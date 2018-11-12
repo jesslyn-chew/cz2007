@@ -1,0 +1,567 @@
+Use ss1g7;
+
+Create table Shops
+(
+	ShopName varchar(20),
+	Primary Key (ShopName),
+);
+
+Create table Products
+(
+	ProductName varchar(20),
+	Maker varchar(20),
+	Category varchar(20),
+CHECK (Category NOT LIKE '%[^a-Z]%'),
+	Primary Key (ProductName)
+);
+
+Create table PriceHistory
+(
+	StartDate datetime,
+	EndDate datetime,
+	CONSTRAINT		check_start_end	CHECK (EndDate > StartDate OR EndDate IS NULL),
+	ProductName varchar(20),
+	ShopName varchar(20),
+	Price float NOT NULL,
+CHECK (Price >= 0),
+	Primary Key (StartDate, ProductName, ShopName),
+	UNIQUE (ProductName, ShopName, EndDate),
+	Foreign Key (ProductName) references Products(ProductName) ON UPDATE CASCADE ON DELETE CASCADE,
+	Foreign Key (ShopName) references Shops(ShopName) ON UPDATE CASCADE ON DELETE CASCADE,
+);
+
+
+Create table Users
+(
+	UserID char(10),
+	Username varchar(20) NOT NULL,
+CHECK (Username NOT LIKE '%[^a-Z]%'),
+	Primary Key (UserID),
+);
+
+Create table Employees
+(
+	EmployeeID char(10),
+	Salary float NOT NULL,
+CHECK (Salary > 0),
+	EmployeeName varchar(20) NOT NULL,
+CHECK (EmployeeName NOT LIKE '%[^a-Z]%'),
+	Primary Key (EmployeeID),
+);
+
+
+Create table Orders
+(
+	OrderID char(10),
+	OrderDate datetime NOT NULL,
+	UserID char(10) NOT NULL,
+	Primary Key (OrderID),
+	UNIQUE (UserID, OrderDate),
+	Foreign Key (UserID) references Users(UserID) ON UPDATE CASCADE ON DELETE CASCADE,	
+);
+
+
+Create table Comments
+(
+	CommentID char(10),
+	CHECK (CommentID NOT LIKE '%[^a-Z]%'),
+	CommentText varchar(200) NOT NULL,
+	UserID char(10) NOT NULL,
+	Primary Key (CommentID),
+	Foreign Key (UserID) references Users(UserID) ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+Create table CommentOnComment
+(
+	CommentID char(10),
+	CommentedID char(10),
+	Primary Key (CommentID),
+	Foreign Key (CommentID) references Comments(CommentID),
+	Foreign Key (CommentedID) references Comments(CommentID) 
+);
+
+Create table CommentOnProduct
+(
+	CommentID char(10),
+	OrderID char(10) NOT NULL,
+	ProductName varchar(20) NOT NULL,
+	ShopName varchar(20) NOT NULL,
+	Primary Key (CommentID),
+	UNIQUE (OrderID, ProductName, ShopName),
+	Foreign Key (CommentID) references Comments(CommentID),
+	Foreign Key (OrderID) references Orders(OrderID) ON UPDATE CASCADE ON DELETE CASCADE,
+	Foreign Key (ProductName) references Products(ProductName) ON UPDATE CASCADE ON DELETE CASCADE,
+	Foreign Key (ShopName) references Shops(ShopName) ON UPDATE CASCADE ON DELETE CASCADE,
+);
+
+Create table Complaints
+(
+	ComplaintID char(10),
+	ComplaintStatus varchar(13) DEFAULT 'pending',
+	CHECK (ComplaintStatus IN ('pending', 'being handled', 'addressed')),
+	ComplaintText varchar(200) NOT NULL,
+	FilingDate datetime NOT NULL,
+	EmployeeID char(10), 
+	UserID char(10) NOT NULL,
+	AddressedDate datetime,
+	CHECK (AddressedDate > FilingDate),
+	Primary Key (ComplaintID),
+	UNIQUE (UserID, FilingDate),
+	UNIQUE (EmployeeID, AddressedDate),
+	Foreign Key (EmployeeID) references Employees(EmployeeID) ON UPDATE CASCADE ON DELETE SET NULL,
+	Foreign Key (UserID) references Users(UserID) ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+Create table ComplaintOnProduct
+(
+	ComplaintID char(10),
+	ProductName varchar(20) NOT NULL,
+	Primary Key (ComplaintID),
+	Foreign Key (ComplaintID) references Complaints(ComplaintID),
+	Foreign Key (ProductName) references Products(ProductName) ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+Create table ComplaintOnShop
+(
+	ComplaintID char(10),
+ShopName varchar(20) NOT NULL,
+	Primary Key (ComplaintID),
+	Foreign Key (ComplaintID) references Complaints(ComplaintID),
+	Foreign Key (ShopName) references Shops(ShopName) ON UPDATE CASCADE ON DELETE CASCADE
+	);
+
+Create table ComplaintOnComment
+(
+	ComplaintID char(10),
+CommentID char(10) NOT NULL,
+	Primary Key (ComplaintID),
+	Foreign Key (ComplaintID) references Complaints(ComplaintID),
+	Foreign Key (CommentID) references Comments(CommentID) ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+
+Create table ProductsInShop
+(
+	ProductName varchar(20),
+	ShopName varchar(20),
+	Price float NOT NULL,
+CHECK (Price > 0),
+Stock int NOT NULL,
+	CHECK (Stock >= 0),
+	Primary Key (ProductName, ShopName),
+	Foreign Key (ProductName) references Products(ProductName) ON UPDATE CASCADE ON DELETE CASCADE,
+	Foreign Key (ShopName) references Shops(ShopName) ON UPDATE CASCADE ON DELETE CASCADE
+	);
+
+
+
+Create table ProductsInOrder
+(
+	OrderID char(10),
+	ProductName varchar(20),
+	ShopName varchar(20),
+	ProductStatus varchar(15) DEFAULT 'being processed',
+	CHECK (ProductStatus IN ('being processed', 'shipped', 'delivered', 'returned')),
+	DeliveryDate datetime, 
+	UserID char(10) NOT NULL,
+	Rating int, 
+	CHECK (Rating BETWEEN 1 AND 5),
+	RatingDate datetime,
+	CHECK (DeliveryDate <= RatingDate OR ratingDate IS NULL),
+CHECK ((productStatus <> 'being processed' AND productStatus <> 'shipped' AND Rating IS NULL AND RatingDate IS NULL) OR (productStatus = 'being processed' OR productStatus = 'shipped')),
+	Primary Key (OrderID, ProductName, ShopName),
+	UNIQUE (UserID, RatingDate),
+	Foreign Key (OrderID) references Orders(OrderID),
+	Foreign Key (ProductName) references Products(ProductName) ON UPDATE CASCADE ON DELETE CASCADE,
+	Foreign Key (ShopName) references Shops(ShopName) ON UPDATE CASCADE ON DELETE CASCADE,
+	Foreign Key (UserID) references Users(UserID) ON UPDATE CASCADE ON DELETE CASCADE
+);
+ =========================================================================================================================================================================================
+ Triggers:
+
+ - Trigger 1a
+-- Ensure that all price remains 2dp in ProductsInShop
+CREATE TRIGGER [dbo].[price2DP]
+ON [dbo].[ProductsInShop]
+AFTER INSERT, UPDATE
+AS
+BEGIN
+	DECLARE @p float;
+	SELECT @p = price FROM inserted;
+	DECLARE @productName varchar(20);
+	SELECT @productName = productName FROM inserted;
+	DECLARE @shopName varchar(20);
+	SELECT @shopName = shopName FROM inserted;
+
+	UPDATE ProductsInShop
+	SET price = ROUND(@p,2)
+	WHERE shopName = @shopName AND productName = @productName;
+END
+GO
+
+-- Trigger 1b
+-- Ensure that prices are in 2dp in PriceHistory
+CREATE TRIGGER [dbo].[price2DP2]
+ON [dbo].[PriceHistory]
+AFTER INSERT, UPDATE
+AS
+BEGIN
+	DECLARE @p float;
+	SELECT @p = price FROM inserted;
+	DECLARE @productName varchar(20);
+	SELECT @productName = ProductName FROM inserted;
+	DECLARE @shopName varchar(20);
+	SELECT @shopName = ShopName FROM inserted;
+	DECLARE @startDate datetime;
+	SELECT @startDate = StartDate FROM inserted;
+
+	UPDATE PriceHistory
+	SET price = ROUND(@p,2)
+	WHERE ShopName = @shopName AND ProductName = @productName AND StartDate = @startDate;
+END
+GO
+
+DROP TRIGGER [dbo].[StockDecrement];
+select * from sys.triggers;
+
+-- Trigger 2a
+-- Decrease stock by 1 when user orders a product
+-- Assuming that quantity in ProductsInOrder = 1
+-- Ensure user cannot order when stock = 0 
+CREATE TRIGGER [dbo].[StockDecrement1] 
+ON [dbo].[ProductsInOrder]
+AFTER INSERT
+AS
+BEGIN
+	DECLARE @ProductName varchar(20);
+	SELECT @ProductName = ProductName FROM inserted;
+	DECLARE @ShopName varchar(20);
+	SELECT @ShopName = ShopName FROM inserted;
+	
+	UPDATE ProductsInShop
+	SET Stock = Stock - 1
+	WHERE ProductName = @ProductName AND ShopName = @ShopName;
+END
+
+-- Trigger 2b
+-- Increase stock by 1 when user returned order
+-- Assuming that quantity in ProductsInOrder = 1
+CREATE TRIGGER [dbo].[StockDecrement2] 
+ON [dbo].[ProductsInOrder]
+AFTER UPDATE
+AS
+BEGIN
+	DECLARE @ProductName varchar(20);
+	SELECT @ProductName = ProductName FROM inserted;
+	DECLARE @ShopName varchar(20);
+	SELECT @ShopName = ShopName FROM inserted;
+	DECLARE @NewProductStatus varchar(15), @OldProductStatus varchar(15);
+	SELECT @NewProductStatus = ProductStatus FROM inserted;	
+	SELECT @OldProductStatus = ProductStatus FROM deleted;
+
+	UPDATE ProductsInShop
+	SET Stock = Stock + 1
+	WHERE ProductName = @ProductName AND ShopName = @ShopName AND
+	@NewProductStatus = 'returned' AND @NewProductStatus <> @OldProductStatus;
+END
+
+
+-- Trigger 3
+-- Update pricehistory when price changes are made in productsInShop
+CREATE TRIGGER [dbo].[priceInsertion]
+ON [dbo].[ProductsInShop]
+AFTER INSERT
+AS
+BEGIN
+	Declare @price float;
+	Select @price = price from inserted;
+	Declare @productName varchar(20);
+	Select @productName = productName from inserted;
+	Declare @shopName varchar(20);
+	Select @shopName = shopName from inserted;
+
+	insert into PriceHistory
+	values(CURRENT_TIMESTAMP,NULL,@productname,@shopname,@price);
+END
+
+CREATE TRIGGER [dbo].[priceUpdate]
+ON [dbo].[ProductsInShop]
+AFTER INSERT
+AS 
+BEGIN
+	Declare @price float;
+	Select @price = price from inserted;
+	Declare @productName varchar(20);
+	Select @productName = productName from inserted;
+	Declare @shopName varchar(20);
+	Select @shopName = shopName from inserted;
+
+	UPDATE PriceHistory
+	SET endDate = CURRENT_TIMESTAMP
+	WHERE shopName = @shopName AND productName = @productName AND endDate is NULL;
+
+	insert into PriceHistory
+	values(CURRENT_TIMESTAMP,NULL,@productname,@shopname,@price);
+END
+
+
+
+
+
+
+-- Trigger 4
+-- When a employee leaves the company, any previously handled complaints
+-- will be set to 'pending' if the previous status = 'being handled'
+-- Else just remove employee info from complaints table
+CREATE TRIGGER [dbo].[employeeResignation]
+ON [dbo].[Employees]
+AFTER DELETE
+AS
+BEGIN
+
+	UPDATE Complaints
+	SET ComplaintStatus = 'pending', EmployeeID = NULL
+	WHERE ComplaintStatus = 'being handled';
+END
+
+==============================================================================================================================================================================
+
+INSERT INTO Employees (EmployeeID,Salary,EmployeeName)
+VALUES
+('E00000001D', 7118.00, 'Timothy'),
+('E00000002D', 2308.50, 'Johnathon'),
+('E00000003D', 7920.00, 'Peterson'),
+('E00000004D', 5961.00, 'Jewel'),
+('E00000005D', 4360.00, 'Megan');
+
+INSERT INTO Products (ProductName, Maker, Category)
+VALUES
+('Apple Watch S4', 'Apple', 'Smart Watch'),
+('AirPods', 'Apple', 'Earpiece'),
+('iPad Pro', 'Apple', 'Tablet'),
+('iPhoneRx', 'Apple', 'Phone'),
+('iPhone Xs', 'Apple', 'Phone'),
+('Gear IconX', 'Samsung', 'EarPiece'),
+('Galaxy Watch G', 'Samsung', 'Smart Watch'),
+('Galaxy Tab S4', 'Samsung', 'Tablet'),
+('Galaxy A6', 'Samsung', 'Phone'),
+('Galaxy S9', 'Samsung', 'Phone'),
+('Tint Lip Balm', 'Innisfree', 'Makeup');
+
+INSERT INTO Shops (ShopName)
+VALUES
+('Shop A'),
+('Shop B'),
+('Shop C'),
+('Shop D'),
+('Shop E'),
+('Shop F'),
+('Shop G'),
+('Shop H'),
+('Shop I'),
+('Shop J'),
+('Shop K'),
+('Shop L'),
+('Shop M'),
+('Shop N'),
+('Shop O');
+
+
+
+INSERT INTO Users(UserID, Username)
+VALUES
+('U12050050Q', 'Louetta'),
+('U12050051Q', 'Lang'),
+('U12050052Q', 'Lennie'),
+('U12050053Q', 'Marylyn'),
+('U12050054Q', 'Tawnya'),
+('U12050055Q', 'Lizeth'),
+('U12060056W', 'Sybil'),
+('U12060057W', 'Alanie'),
+('U12060058W', 'Doreen'),
+('U12060059W', 'Teri'),
+('U20045015A', 'Jonathan'),
+('U20045016A', 'Ralph'),
+('U20045017A', 'Jerrold'),
+('U20045018A', 'Bruno'),
+('U20045019A', 'Theo');
+
+
+INSERT INTO ProductsInShop(ProductName, ShopName, Price ,Stock) ////////
+VALUES
+('Apple Watch S4', 'Shop O', 649.00, 896),
+('Apple Watch S4', 'Shop J', 600.00, 201),
+('AirPods', 'Shop F', 238.00, 246),
+('AirPods', 'Shop L', 238.00, 730),
+('AirPods', 'Shop K', 240.00, 296),
+('iPad Pro', 'Shop M', 799.99, 762),
+('iPad Pro', 'Shop A', 899.99, 973),
+('iPad Pro', 'Shop O', 999.00, 317),
+('iPhoneRx', 'Shop N', 999.99, 128),
+('iPhoneRx', 'Shop D', 979.99, 934),
+('iPhoneRx', 'Shop G', 989.99, 668),
+
+('iPhone Xs', 'Shop A', 1499.00, 17),
+('iPhone Xs', 'Shop B', 1478.00, 45),
+('iPhone Xs', 'Shop C', 1978.00, 237),
+('iPhone Xs', 'Shop D', 1800.00, 32),
+('iPhone Xs', 'Shop E', 1600.00, 127),
+('iPhone Xs', 'Shop F', 1700.00, 612),
+('iPhone Xs', 'Shop G', 1978.99, 87),
+
+('Gear IconX', 'Shop M', 200.00, 493),
+('Gear IconX', 'Shop N', 199.99, 28),
+('Gear IconX', 'Shop L', 179.99, 712),
+('Gear IconX', 'Shop O', 180.00, 24),
+('Gear IconX', 'Shop K', 210.00, 581),
+('Gear IconX', 'Shop D', 210.00, 168),
+('Galaxy Watch G', 'Shop L', 398.00, 876),
+('Galaxy Watch G', 'Shop I', 362.00, 99),
+('Galaxy Tab S4', 'Shop I', 600.00, 46),
+('Galaxy Tab S4', 'Shop C', 608.00, 57),
+('Galaxy Tab S4', 'Shop G', 700.00, 51),
+('Galaxy S9', 'Shop A', 740.00, 852),
+('Galaxy S9', 'Shop C', 1198.00, 17),
+('Galaxy S9', 'Shop E', 834.99, 567),
+('Galaxy S9', 'Shop G', 1001.00, 38),
+('Galaxy S9', 'Shop H', 999.00, 843),
+('Galaxy S9', 'Shop J', 740.00, 749),
+('Galaxy S9', 'Shop M', 1199.00, 560),
+('Galaxy S9', 'Shop O', 900.00, 768),
+('Galaxy S9', 'Shop L', 1000.00, 652),
+('Galaxy S9', 'Shop B', 865.00, 281),
+('Tint Lip Balm', 'Shop C', 9.99, 589);
+
+
+
+INSERT INTO PriceHistory (StartDate, EndDate, ProductName, ShopName, Price)
+VALUES
+('2018-01-12 00:00:00.000', NULL, 'Apple Watch S4', 'Shop O', 649.00),
+('2018-01-12 00:00:00.000', NULL, 'Apple Watch S4', 'Shop J', 600.00),
+('2018-01-12 00:00:00.000', NULL, 'AirPods', 'Shop F', 238.00),
+('2018-01-12 00:00:00.000', NULL,'AirPods', 'Shop L', 238.00),
+('2018-01-12 00:00:00.000', NULL, 'AirPods', 'Shop K', 240.99),
+('2018-01-12 00:00:00.000', NULL, 'iPad Pro', 'Shop M', 799.99),
+('2018-01-12 00:00:00.000', NULL, 'iPad Pro', 'Shop A', 899.99),
+('2018-01-12 00:00:00.000', NULL, 'iPad Pro', 'Shop O', 999.00),
+('2018-01-12 00:00:00.000', NULL, 'iPhoneRx', 'Shop N', 999.99),
+('2018-01-12 00:00:00.000', NULL, 'iPhoneRx', 'Shop D', 979.99),
+('2018-01-12 00:00:00.000', NULL, 'iPhoneRx', 'Shop G', 989.99),
+
+('2018-01-12 00:00:00.000', '2018-08-20 00:00:00.000', 'iPhone Xs', 'Shop A', 1500.00),
+('2018-08-21 00:00:00.000', NULL, 'iPhone Xs', 'Shop A', 1499.99),
+('2018-01-12 00:00:00.000', '2018-09-20 00:00:00.000','iPhone Xs', 'Shop B', 1499.99),
+('2018-09-21 00:00:00.000',  NULL, 'iPhone Xs', 'Shop B', 1478.00),
+('2018-01-12 00:00:00.000', NULL,'iPhone Xs', 'Shop C', 1978.00),
+('2018-01-12 00:00:00.000', '2018-08-01 00:00:00.000', 'iPhone Xs', 'Shop D', 1899.99),
+('2018-08-02 00:00:00.000', '2018-08-31 00:00:00.000','iPhone Xs', 'Shop D',1879.00),
+('2018-09-01 00:00:00.000', NULL, 'iPhone Xs', 'Shop D', 1800.00),
+('2018-06-21 00:00:00.000', '2018-07-21 00:00:00.000', 'iPhone Xs', 'Shop E', 1800.00),
+('2018-07-22 00:00:00.000', NULL, 'iPhone Xs', 'Shop E', 1600.00),
+('2018-07-22 00:00:00.000', '2018-09-21 00:00:00.000', 'iPhone Xs', 'Shop F', 1999.99),
+('2018-09-22 00:00:00.000', NULL, 'iPhone Xs', 'Shop F', 1700.00),
+('2018-01-12 00:00:00.000', '2018-08-20 00:00:00.000', 'iPhone Xs', 'Shop G', 1500.00),
+('2018-08-21 00:00:00.000', '2018-09-10 00:00:00.000', 'iPhone Xs', 'Shop G', 1499.99),
+('2018-09-11 00:00:00.000', NULL, 'iPhone Xs', 'Shop G', 1978.99),
+
+('2018-01-12 00:00:00.000', NULL, 'Gear IconX', 'Shop M', 200.00),
+('2018-01-12 00:00:00.000', NULL, 'Gear IconX', 'Shop N', 199.99),
+('2018-01-12 00:00:00.000', NULL, 'Gear IconX', 'Shop L', 179.99),
+('2018-01-12 00:00:00.000', NULL, 'Gear IconX', 'Shop O', 180.00),
+('2018-01-12 00:00:00.000', NULL, 'Gear IconX', 'Shop K', 210.00),
+('2018-01-12 00:00:00.000', NULL, 'Gear IconX', 'Shop D', 210.00),
+('2018-01-12 00:00:00.000', NULL, 'Galaxy Watch G', 'Shop L', 398.00),
+('2018-01-12 00:00:00.000', NULL, 'Galaxy Watch G', 'Shop I', 362.00),
+('2018-01-12 00:00:00.000', NULL, 'Galaxy Tab S4', 'Shop I', 600.00),
+('2018-01-12 00:00:00.000', NULL, 'Galaxy Tab S4', 'Shop C', 608.00),
+('2018-01-12 00:00:00.000', NULL, 'Galaxy Tab S4', 'Shop G', 700.00),
+('2018-01-12 00:00:00.000', NULL, 'Galaxy S9', 'Shop A', 740.00),
+('2018-01-12 00:00:00.000', NULL, 'Galaxy S9', 'Shop C', 1198.00),
+('2018-01-12 00:00:00.000', NULL, 'Galaxy S9', 'Shop E', 834.99),
+('2018-01-12 00:00:00.000', NULL, 'Galaxy S9', 'Shop G', 1001.00),
+('2018-01-12', NULL, 'Galaxy S9', 'Shop H', 999.99),
+('2018-01-12', NULL, 'Galaxy S9', 'Shop J', 740.00),
+('2018-01-12', NULL, 'Galaxy S9', 'Shop M', 1199.00),
+('2018-01-12', NULL, 'Galaxy S9', 'Shop O', 900.00),
+('2018-01-12', NULL, 'Galaxy S9', 'Shop L', 1000.00),
+('2018-01-12', NULL, 'Galaxy S9', 'Shop B', 865.00),
+('2018-01-12', NULL, 'Tint Lip Balm', 'Shop C', 9.99);
+
+INSERT INTO Orders (OrderID, OrderDate, UserID)
+VALUES
+('O23005430G', '2018-07-01 11:00:00.000', 'U12050050Q'),
+('O23005431G', '2018-07-03 10:00:00.000', 'U12050051Q'),
+('O23005432G', '2018-07-06 11:00:00.000', 'U12050052Q'),
+('O23005433G', '2018-07-09 10:00:00.000', 'U12050053Q'),
+('O23005434G', '2018-07-12 11:00:00.000', 'U12050054Q'),
+('O23005423Q', '2018-07-21 10:00:00.000', 'U12050055Q'),
+('O23005454G', '2018-10-21 10:00:00.000', 'U12050055Q');
+
+INSERT INTO ProductsInOrder (OrderID, UserID, ProductName, ShopName, ProductStatus, DeliveryDate, Rating, RatingDate)
+VALUES
+
+('O23005430G', 'U12050050Q','Galaxy S9', 'Shop M', 'delivered', '2018-08-10 10:00:00.000', 5, '2018-08-12 10:00:000'),
+('O23005430G', 'U12050050Q', 'Galaxy Watch G', 'Shop L', 'shipped', NULL, NULL, NULL),
+('O23005430G', 'U12050050Q', 'Gear IconX', 'Shop N', 'delivered', '2018-08-10 10:00:00.000', 5, '2018-08-12 10:02:000'),
+
+('O23005431G', 'U12050051Q', 'Galaxy S9', 'Shop M', 'delivered', '2018-08-10 10:00:00.000', 5, '2018-08-12 10:00:00.000'),
+('O23005431G', 'U12050051Q', 'Gear IconX', 'Shop N', 'delivered', '2018-08-10 10:00:00.000', 5, '2018-08-12 10:05:000'),
+
+('O23005432G', 'U12050052Q', 'Galaxy S9', 'Shop M', 'delivered', '2018-08-10 10:00:00.000', 5, '2018-08-12 10:00:000'),
+('O23005432G', 'U12050052Q', 'Gear IconX', 'Shop N', 'delivered', '2018-08-10 10:00:00.000', 5, '2018-08-12 10:20:000'),
+
+('O23005433G', 'U12050053Q', 'Galaxy S9', 'Shop M', 'delivered', '2018-08-10 10:00:00.000', 5, '2018-08-12 10:00:000'),
+('O23005433G', 'U12050053Q', 'Gear IconX', 'Shop N', 'delivered', '2018-08-10 10:00:00.000', 5, '2018-08-12 10:13:000'),
+
+('O23005434G', 'U12050054Q', 'Galaxy S9', 'Shop M', 'delivered', '2018-08-10 10:00:00.000', 5, '2018-08-12 10:00:000'),
+('O23005434G', 'U12050054Q', 'Gear IconX', 'Shop N', 'delivered', '2018-08-10 10:00:00.000', 5, '2018-08-12 10:02:000'),
+('O23005434G', 'U12050054Q', 'Apple Watch S4', 'Shop O', 'returned', '2018-09-10 10:00:00.000', 1, '2018-09-12 14:00:000'),
+
+('O23005423Q', 'U12050055Q', 'Galaxy S9', 'Shop M', 'delivered', '2018-08-10 10:00:00.000', 4, '2018-08-12 20:00:000'),
+('O23005423Q', 'U12050055Q', 'Gear IconX', 'Shop N', 'returned', '2018-08-10', 1, '2018-08-12 10:00:00'),
+
+('O23005454G', 'U12050055Q', 'Tint Lip Balm', 'Shop C', 'being processed', '2018-11-01 5:00:00.000', NULL, NULL),
+('O23005454G', 'U12050055Q', 'AirPods', 'Shop F', 'delivered', '2018-10-31  11:00:00.000', NULL, '2018-08-12 10:03:00');
+
+
+INSERT INTO Comments (CommentID, CommentText, UserID) 
+VALUES
+('C12345670D', 'This product is awesome!', 'U12050052Q'),
+('C12345671D', 'I think so too', 'U12050051Q'),
+('C12345672D', 'Go die', 'U12050054Q');
+
+INSERT INTO CommentOnComment (CommentID, CommentedID) 
+VALUES
+('C12345671D', 'C12345670D');
+
+
+INSERT INTO CommentOnProduct (CommentID, OrderID, ProductName, ShopName)
+VALUES
+('C12345670D', 'O23005432G', 'Galaxy S9', 'Shop M'),
+('C12345672D', 'O23005434G', 'Apple Watch S4', 'Shop O');
+
+INSERT INTO Complaints (ComplaintID, COmplaintStatus, ComplaintText, FilingDate, EmployeeID, UserID, AddressedDate)
+VALUES
+('CP0012001C', 'addressed', 'This individual has posted an inappropriate comment', '2018-08-15 10:00:00.000', 'E00000001D', 'U12060057W', '2018-08-17 10:00:00.000'), 
+('CP0012002C', 'addressed', 'This shop service is terrible', '2018-10-31 10:00:00.000', 'E00000001D', 'U12050055Q', '2018-11-03 10:00:00.000'),
+('CP0012003C', 'addressed', 'This product is defected', '2018-09-12 10:00:00.000', 'E00000002D', 'U12050054Q', '2018-09-22 10:00:00.000'),
+('CP0012004C', 'addressed', 'My product has not been delivered, even though it status says so', '2018-10-31  12:00:00.000', 'E00000002D', 'U12050055Q', '2018-11-02 10:00:00.000'),
+('CP0012005C', 'addressed', 'This product is defected', '2018-08-11 10:00:00.000', 'E00000003D', 'U12050055Q', '2018-09-01 10:00:00.000'),
+('CP0012006C', 'pending', 'This shop has bad service', '2018-11-03 10:00:00.000', NULL , 'U12050050Q', NULL);
+
+
+INSERT INTO ComplaintOnProduct (ComplaintID, ProductName)
+VALUES
+('CP0012003C', 'Apple Watch S4'),
+('CP0012005C', 'Gear IconX');
+
+INSERT INTO ComplaintOnShop (ComplaintID, ShopName)
+VALUES
+('CP0012002C', 'Shop C'),
+('CP0012004C', 'Shop F'),
+('CP0012006C', 'Shop L');
+
+INSERT INTO ComplaintOnComment (ComplaintID, CommentID)
+VALUES
+('CP0012001C', 'C12345672D');
+
